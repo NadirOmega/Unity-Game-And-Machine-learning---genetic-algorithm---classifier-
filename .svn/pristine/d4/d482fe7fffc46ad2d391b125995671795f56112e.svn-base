@@ -1,0 +1,294 @@
+﻿using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using Hexas;
+using Characters;
+
+namespace Classifiers {
+
+public class ClassifierAttributes {
+	public enum CharClass : byte {GUERRIER = 1,VOLEUR = 2,ARCHER = 4,MAGE = 8,SOIGNEUR = 16,ENVOUTEUR = 32};
+	public enum HP_ : byte {BETWEEN_100_75 = 1,BETWEEN_74_40 = 2,BETWEEN_39_0 = 4};
+	public enum PA_ : byte {ONE = 1, TWO_OR_MORE = 2};
+	public enum SkillAvailable : byte {YES = 1,NO = 2};
+	public enum Threat : byte {SAFE = 1,DANGER = 2,DEATH = 4};
+	
+	public enum ClassType : byte {SOIGNEUR = 1,ENVOUTEUR = 2,OTHER = 4};
+}
+
+public class Classifier {
+	public byte charClass;
+	public byte HP; 
+	public byte PA;
+	public byte skillAvailable;
+	public byte threat;
+	
+	public class InfoChars{
+		public byte classType; // soigneur / envouteur / autres
+		public byte HP;
+		public byte threat;
+		
+		public InfoChars(Character c){
+			// ClassType
+			switch (c.charClass){
+				case CharClass.GUERRIER  : 
+				case CharClass.VOLEUR    :
+				case CharClass.ARCHER    : 
+				case CharClass.MAGE      : classType = (byte)ClassifierAttributes.ClassType.OTHER; break;
+				case CharClass.SOIGNEUR  : classType = (byte)ClassifierAttributes.ClassType.SOIGNEUR; break;
+				case CharClass.ENVOUTEUR : classType = (byte)ClassifierAttributes.ClassType.ENVOUTEUR; break;
+			}
+			
+			// HP
+			float HPprc = ((float)c.HP)/c.HPmax;
+			if (HPprc >= 0.75){
+				HP = (byte)ClassifierAttributes.HP_.BETWEEN_100_75;
+			}else if (HPprc >= 0.4){
+				HP = (byte)ClassifierAttributes.HP_.BETWEEN_74_40;
+			}else{
+				HP = (byte)ClassifierAttributes.HP_.BETWEEN_39_0;
+			}
+			
+			// Threat
+			threat = 1;
+		}
+	}
+	
+	public List<InfoChars> infoAllies;
+	public List<InfoChars> infoEnnemies;
+	
+	public enum Action : byte {ApproachEnnemy , ApproachAlly , RandomMovement , Flee , Attack , Skill};
+	public Action action;
+	
+	public float fitness;
+	public int usedCount;
+	
+	public Classifier(HexaGrid hexaGrid,int charID){
+		Character c = hexaGrid.charList[charID];
+		
+		// ClassType
+		switch (c.charClass){
+			case CharClass.GUERRIER  : charClass = (byte)ClassifierAttributes.CharClass.GUERRIER; break;
+			case CharClass.VOLEUR    : charClass = (byte)ClassifierAttributes.CharClass.VOLEUR; break;
+			case CharClass.ARCHER    : charClass = (byte)ClassifierAttributes.CharClass.ARCHER; break;
+			case CharClass.MAGE      : charClass = (byte)ClassifierAttributes.CharClass.MAGE; break;
+			case CharClass.SOIGNEUR  : charClass = (byte)ClassifierAttributes.CharClass.SOIGNEUR; break;
+			case CharClass.ENVOUTEUR : charClass = (byte)ClassifierAttributes.CharClass.ENVOUTEUR; break;
+		}
+		
+		// HP
+		float HPprc = ((float)c.HP)/c.HPmax;
+		if (HPprc >= 0.75){
+			HP = (byte)ClassifierAttributes.HP_.BETWEEN_100_75;
+		}else if (HPprc >= 0.4){
+			HP = (byte)ClassifierAttributes.HP_.BETWEEN_74_40;
+		}else{
+			HP = (byte)ClassifierAttributes.HP_.BETWEEN_39_0;
+		}
+		
+		// PA
+		PA = (c.PA == 1) ? (byte)ClassifierAttributes.PA_.ONE : (byte)ClassifierAttributes.PA_.TWO_OR_MORE;
+		
+		// SkillAvailable
+		skillAvailable = (c.skillAvailable) ? (byte)ClassifierAttributes.SkillAvailable.YES : (byte)ClassifierAttributes.SkillAvailable.NO;
+		
+		// Threat
+		threat = 1;
+		
+		infoAllies   = new List<InfoChars>();
+		infoEnnemies = new List<InfoChars>();
+		
+		// infoAllies / infoEnnemies
+		foreach (Character c2 in hexaGrid.charList){
+			if (c2 != c){
+				if (c2.team == c.team&& hexaGrid.hexaInSight(c.x,c.y,c2.x,c2.y,c.getClassData().basicAttack.range)){ // Ally
+					infoAllies.Add(new InfoChars(c2));
+				}if (c2.team !=c.team &&  hexaGrid.hexaInSight(c.x,c.y,c2.x,c2.y,c.getClassData().basicAttack.range)){ // Ennemy
+					infoEnnemies.Add(new InfoChars(c2));
+				}
+			}
+		}
+		// TO DO : WILDCARD allies/Ennemuies
+		
+		action = Action.RandomMovement;
+	}
+	
+	public bool equals(Classifier c){
+		return ((charClass == c.charClass) &&
+		(HP == c.HP) &&
+		(PA == c.PA) &&
+		(PA == c.PA) &&
+		(skillAvailable == c.skillAvailable) &&
+		(threat == c.threat) &&
+		(action == c.action));
+	}
+	
+	public bool isSimilar(Classifier c){
+		return (((charClass & c.charClass) > 0) &&
+		((HP & c.HP) > 0) &&
+		((PA & c.PA) > 0) &&
+		((PA & c.PA) > 0) &&
+		((skillAvailable & c.skillAvailable) > 0) &&
+		((threat & c.threat) > 0) &&
+		(action == c.action));
+	}
+	
+	// These don't check for action match (Used to matching situations)
+	public bool equals2(Classifier c){
+		return ((charClass == c.charClass) &&
+		(HP == c.HP) &&
+		(PA == c.PA) &&
+		(PA == c.PA) &&
+		(skillAvailable == c.skillAvailable) &&
+		(threat == c.threat));
+	}
+	
+	public bool isSimilar2(Classifier c){
+		return (((charClass & c.charClass) > 0) &&
+		((HP & c.HP) > 0) &&
+		((PA & c.PA) > 0) &&
+		((PA & c.PA) > 0) &&
+		((skillAvailable & c.skillAvailable) > 0) &&
+		((threat & c.threat) > 0));
+	}
+	
+	public void display(){
+		string strDisp = "Char class :";
+		if ((charClass & (byte)ClassifierAttributes.CharClass.GUERRIER) > 0) strDisp += "GUERRIER ";
+		if ((charClass & (byte)ClassifierAttributes.CharClass.VOLEUR) > 0) strDisp += "VOLEUR ";
+		if ((charClass & (byte)ClassifierAttributes.CharClass.ARCHER) > 0) strDisp += "ARCHER ";
+		if ((charClass & (byte)ClassifierAttributes.CharClass.MAGE) > 0) strDisp += "MAGE ";
+		if ((charClass & (byte)ClassifierAttributes.CharClass.SOIGNEUR) > 0) strDisp += "SOIGNEUR ";
+		if ((charClass & (byte)ClassifierAttributes.CharClass.ENVOUTEUR) > 0) strDisp += "ENVOUTEUR ";
+		
+		strDisp += "|HP : ";
+		if ((HP & (byte)ClassifierAttributes.HP_.BETWEEN_100_75) > 0) strDisp += "100-75% ";
+		if ((HP & (byte)ClassifierAttributes.HP_.BETWEEN_74_40) > 0) strDisp += "74-40% ";
+		if ((HP & (byte)ClassifierAttributes.HP_.BETWEEN_39_0) > 0) strDisp += "39-0% ";
+		
+		strDisp += "|PA : ";
+		if ((PA & (byte)ClassifierAttributes.PA_.ONE) > 0) strDisp += "ONE ";
+		if ((PA & (byte)ClassifierAttributes.PA_.TWO_OR_MORE) > 0) strDisp += "TWO+ ";
+		
+		strDisp += "|Skill : ";
+		if ((skillAvailable & (byte)ClassifierAttributes.SkillAvailable.YES) > 0) strDisp += "YES ";
+		if ((skillAvailable & (byte)ClassifierAttributes.SkillAvailable.NO) > 0) strDisp += "NO ";
+		
+		strDisp += "|Threat : ";
+		if ((threat & (byte)ClassifierAttributes.Threat.SAFE) > 0) strDisp += "SAFE ";
+		if ((threat & (byte)ClassifierAttributes.Threat.DANGER) > 0) strDisp += "DANGER ";
+		if ((threat & (byte)ClassifierAttributes.Threat.DEATH) > 0) strDisp += "DEATH ";
+		
+		strDisp += "\nAllies :";
+		foreach (InfoChars i in infoAllies){
+			strDisp += "\nClass Type : ";
+			if ((i.classType & (byte)ClassifierAttributes.ClassType.SOIGNEUR) > 0) strDisp += "SOIGNEUR ";
+			if ((i.classType & (byte)ClassifierAttributes.ClassType.ENVOUTEUR) > 0) strDisp += "ENVOUTEUR ";
+			if ((i.classType & (byte)ClassifierAttributes.ClassType.OTHER) > 0) strDisp += "OTHER ";
+			strDisp += "|HP : ";
+			if ((i.HP & (byte)ClassifierAttributes.HP_.BETWEEN_100_75) > 0) strDisp += "100-75% ";
+			if ((i.HP & (byte)ClassifierAttributes.HP_.BETWEEN_74_40) > 0) strDisp += "74-40% ";
+			if ((i.HP & (byte)ClassifierAttributes.HP_.BETWEEN_39_0) > 0) strDisp += "39-0% ";
+			
+			strDisp += "|Threat : ";
+			if ((i.threat & (byte)ClassifierAttributes.Threat.SAFE) > 0) strDisp += "SAFE ";
+			if ((i.threat & (byte)ClassifierAttributes.Threat.DANGER) > 0) strDisp += "DANGER ";
+			if ((i.threat & (byte)ClassifierAttributes.Threat.DEATH) > 0) strDisp += "DEATH ";
+		}
+		strDisp += "\nEnnemies :";
+		foreach (InfoChars i in infoEnnemies){
+			strDisp += "\nClass Type : ";
+			if ((i.classType & (byte)ClassifierAttributes.ClassType.SOIGNEUR) > 0) strDisp += "SOIGNEUR ";
+			if ((i.classType & (byte)ClassifierAttributes.ClassType.ENVOUTEUR) > 0) strDisp += "ENVOUTEUR ";
+			if ((i.classType & (byte)ClassifierAttributes.ClassType.OTHER) > 0) strDisp += "(GUERRIER/VOLEUR/ARCHER/MAGE) ";
+			strDisp += "|HP : ";
+			if ((i.HP & (byte)ClassifierAttributes.HP_.BETWEEN_100_75) > 0) strDisp += "100-75% ";
+			if ((i.HP & (byte)ClassifierAttributes.HP_.BETWEEN_74_40) > 0) strDisp += "74-40% ";
+			if ((i.HP & (byte)ClassifierAttributes.HP_.BETWEEN_39_0) > 0) strDisp += "39-0% ";
+			
+			strDisp += "|Threat : ";
+			if ((i.threat & (byte)ClassifierAttributes.Threat.SAFE) > 0) strDisp += "SAFE ";
+			if ((i.threat & (byte)ClassifierAttributes.Threat.DANGER) > 0) strDisp += "DANGER ";
+			if ((i.threat & (byte)ClassifierAttributes.Threat.DEATH) > 0) strDisp += "DEATH ";
+		}
+		
+		strDisp += "\nAction : ";
+		strDisp += "rkgfrefk";
+		
+		Debug.Log(strDisp);
+	}
+	/*All this methods will be used for mutations  */
+
+	public static ClassifierAttributes.HP_ returnRandomHPValue(){
+		var values = ClassifierAttributes.HP_.GetValues(typeof(ClassifierAttributes.HP_));
+		System.Random random = new System.Random();
+		int nb = random.Next(0,values.Length);
+		ClassifierAttributes.HP_ randomVal = (ClassifierAttributes.HP_)values.GetValue(nb); 	
+		return randomVal;
+	}
+
+	public static ClassifierAttributes.CharClass returnRandomCharClassValue(){
+		var values = ClassifierAttributes.CharClass.GetValues(typeof(ClassifierAttributes.CharClass));
+		System.Random random = new System.Random();
+		int nb = random.Next(0,values.Length);
+		ClassifierAttributes.CharClass randomVal = (ClassifierAttributes.CharClass)values.GetValue(nb); 	
+		return randomVal;
+	}
+
+	public static ClassifierAttributes.PA_ returnRandomPAValue(){
+		var values = ClassifierAttributes.PA_.GetValues(typeof(ClassifierAttributes.PA_));
+		System.Random random = new System.Random();
+		int nb = random.Next(0,values.Length);
+		ClassifierAttributes.PA_ randomVal = (ClassifierAttributes.PA_)values.GetValue(nb); 	
+		return randomVal;
+	}
+
+	public static ClassifierAttributes.SkillAvailable returnRandomSkillValue(){
+		var values = ClassifierAttributes.SkillAvailable.GetValues(typeof(ClassifierAttributes.SkillAvailable));
+		System.Random random = new System.Random();
+		int nb = random.Next(0,values.Length);
+		ClassifierAttributes.SkillAvailable randomVal = (ClassifierAttributes.SkillAvailable)values.GetValue(nb); 	
+		return randomVal;
+	}
+
+	public static ClassifierAttributes.Threat returnRandomThreatValue(){
+		var values = ClassifierAttributes.Threat.GetValues(typeof(ClassifierAttributes.Threat));
+		System.Random random = new System.Random();
+		int nb = random.Next(0,values.Length);
+		ClassifierAttributes.Threat randomVal = (ClassifierAttributes.Threat)values.GetValue(nb); 	
+		return randomVal;
+	}
+	public static Action getRandomActionFromEnum()
+	{
+		var values = Action.GetValues(typeof(Action));
+		System.Random random = new System.Random();
+		int nb = random.Next(0,values.Length);
+		Action randomVal = (Action)values.GetValue(nb);
+		return randomVal;
+
+	}
+}
+
+public class ClassifierSystem {
+	List<Classifier> classifiers;
+	
+	public ClassifierSystem(){
+		classifiers = new List<Classifier>();
+	}
+	
+	public void Add(Classifier classifier){
+		classifiers.Add(classifier);
+	}
+	
+	public List<Classifier> findMatchingClassifiers(Classifier classifier){
+		List<Classifier> r = new List<Classifier>();
+		foreach (Classifier c in classifiers){
+			if (c.isSimilar2(classifier)){
+				r.Add(c);
+			}
+		}
+		return r;
+	}
+}
+
+}

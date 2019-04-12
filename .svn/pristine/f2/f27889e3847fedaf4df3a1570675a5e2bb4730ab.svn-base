@@ -1,0 +1,55 @@
+using Mono.Data.Sqlite;
+using System.Data;
+using System.Collections;
+using System;
+using System.IO;
+using UnityEngine;
+
+
+public class DB {
+     /// <summary>
+    /// get connection to the Rule database.
+    /// </summary>
+    /// <returns>IDbConnection object that contain the databese instance </returns>
+    public static IDbConnection connectBDD()
+    {
+
+        //Connection à la base de données
+        string conn = "URI=file:" + Application.dataPath + "/Classifiers.db"; //Path to database
+
+     IDbConnection dbconn;
+     dbconn = (IDbConnection) new SqliteConnection(conn);
+     dbconn.Open(); //Open connection to the database.
+     return dbconn;
+    }
+
+    public static void addRule(Classifiers.Classifier c )
+    {
+        IDbConnection dbconn = connectBDD();
+        IDbCommand dbCommand = dbconn.CreateCommand ();
+        dbCommand.CommandText = "INSERT INTO Rules (SITUATION, ACTION, FITNESS) values ('"+ c.RuleToString() + "','" + c.action.ToString() + "'," + 10.0 + ")";
+        dbCommand.ExecuteNonQuery();
+        dbCommand.Dispose();
+        dbconn.Close();
+    }
+     
+      public static void addRule(Classifiers.Classifier c , float tempFitness)
+    {
+        IDbConnection dbconn = connectBDD();
+        IDbCommand dbCommand = dbconn.CreateCommand ();
+        dbCommand.CommandText = "INSERT INTO Rules (SITUATION, ACTION) values ('"+ c.RuleToString() + "','" + c.action.ToString() + "'," + tempFitness + ")";
+        dbCommand.ExecuteNonQuery();
+        dbCommand.Dispose();
+        dbconn.Close();
+    }
+    
+     public static void UpdateRuleFitness(Classifiers.Classifier c , float tempFitness)
+    {       
+        IDbConnection dbconn = connectBDD();
+        IDbCommand dbCommand = dbconn.CreateCommand ();
+        dbCommand.CommandText = "UPDATE Rules SET FITNESS = " + tempFitness + " WHERE SITUATION='" + c.RuleToString() + "';";
+        dbCommand.ExecuteNonQuery();
+        dbCommand.Dispose();
+        dbconn.Close();
+    }
+ }

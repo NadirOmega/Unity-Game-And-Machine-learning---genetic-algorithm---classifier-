@@ -1,0 +1,833 @@
+﻿using System.Collections;
+using System.Collections.Generic;
+using System.IO;
+using UnityEngine;
+using Hexas;
+using Characters;
+using AI_Util;
+using System.Data;
+using Mono.Data.Sqlite;
+using System;
+using System.Text;
+using System.Linq;
+
+namespace Classifiers {
+
+public class ClassifierAttributes {
+	public enum CharClass : byte {GUERRIER = 1,VOLEUR = 2,ARCHER = 4,MAGE = 8,SOIGNEUR = 16,ENVOUTEUR = 32};
+	public enum HP_ : byte {BETWEEN_100_75 = 1,BETWEEN_74_40 = 2,BETWEEN_39_0 = 4};
+	public enum PA_ : byte {ONE = 1, TWO_OR_MORE = 2};
+	public enum SkillAvailable : byte {YES = 1,NO = 2};
+	public enum Threat : byte {SAFE = 1,DANGER = 2,DEATH = 4};
+	public enum MaxTargets : byte {NONE = 1,ONE = 2,TWO = 4,THREE_OR_MORE = 8};
+	
+	public enum ClassType : byte {SOIGNEUR = 1,ENVOUTEUR = 2,OTHER = 4,NONE = 8};
+	public enum Distance : byte {ATTACK = 1,SKILL = 2,ATTACK_AND_SKILL = 4,MOVEMENT = 8};
+	
+	public static CharClass getRandomCharClassValue(){
+		var values = CharClass.GetValues(typeof(CharClass));
+		System.Random random = new System.Random();
+		int nb = random.Next(0,values.Length);
+		CharClass randomVal = (CharClass)values.GetValue(nb); 	
+		return randomVal;
+	}
+	public static HP_ getRandomHPValue(){
+		var values = HP_.GetValues(typeof(HP_));
+		System.Random random = new System.Random();
+		int nb = random.Next(0,values.Length);
+		HP_ randomVal = (HP_)values.GetValue(nb); 	
+		return randomVal;
+	}
+	public static PA_ getRandomPAValue(){
+		var values = PA_.GetValues(typeof(PA_));
+		System.Random random = new System.Random();
+		int nb = random.Next(0,values.Length);
+		PA_ randomVal = (PA_)values.GetValue(nb); 	
+		return randomVal;
+	}
+
+	public static SkillAvailable getRandomSkillValue(){
+		var values = SkillAvailable.GetValues(typeof(SkillAvailable));
+		System.Random random = new System.Random();
+		int nb = random.Next(0,values.Length);
+		SkillAvailable randomVal = (SkillAvailable)values.GetValue(nb); 	
+		return randomVal;
+	}
+
+	public static Threat getRandomThreatValue(){
+		var values = Threat.GetValues(typeof(Threat));
+		System.Random random = new System.Random();
+		int nb = random.Next(0,values.Length);
+		Threat randomVal = (Threat)values.GetValue(nb); 	
+		return randomVal;
+	}
+	
+	/**mutate ally & ennemy*/
+	public static ClassType getRandomCharTypeValue(byte OldValue)
+	{
+		var values = ClassType.GetValues(typeof(ClassType));
+		System.Random random = new System.Random();
+		
+		ClassType randomVal;
+		int nb ;
+		do {
+		nb = random.Next(0,values.Length);
+		randomVal = (ClassType)values.GetValue(nb); 	
+		}while(((byte)randomVal)==OldValue);
+
+		return randomVal;
+	}
+}
+
+public class Classifier {
+    public int id;
+    public bool modified;
+	public byte charClass;
+	public byte HP; 
+	public byte PA;
+	public byte skillAvailable;
+	public byte threat;
+	public byte maxTargets;
+	
+	public class InfoChars{
+		public byte classType; // soigneur / envouteur / autres
+		public byte HP;
+		public byte threat;
+		public byte distance;
+		
+		public InfoChars(Character c,bool isWithinAttackRange,bool isWithinSkillRange){
+			// ClassType
+			switch (c.charClass){
+				case CharClass.GUERRIER  : 
+				case CharClass.VOLEUR    :
+				case CharClass.ARCHER    : 
+				case CharClass.MAGE      : classType = (byte)ClassifierAttributes.ClassType.OTHER; break;
+				case CharClass.SOIGNEUR  : classType = (byte)ClassifierAttributes.ClassType.SOIGNEUR; break;
+				case CharClass.ENVOUTEUR : classType = (byte)ClassifierAttributes.ClassType.ENVOUTEUR; break;
+			}
+			
+			// HP
+			float HPprc = ((float)c.HP)/c.HPmax;
+			if (HPprc >= 0.75){
+				HP = (byte)ClassifierAttributes.HP_.BETWEEN_100_75;
+			}else if (HPprc >= 0.4){
+				HP = (byte)ClassifierAttributes.HP_.BETWEEN_74_40;
+			}else{
+				HP = (byte)ClassifierAttributes.HP_.BETWEEN_39_0;
+			}
+			
+			// Threat
+			int threat_int = AIUtil.calculateThreatAtHexa(c.x,c.y,c.team);
+			if (c.HP - threat_int <= 0){
+				threat = (byte)ClassifierAttributes.Threat.DEATH;
+			}else if (threat_int <= 2){
+				threat = (byte)ClassifierAttributes.Threat.SAFE;
+			}else{
+				threat = (byte)ClassifierAttributes.Threat.DANGER;
+			}
+			
+			// Distance
+			if (isWithinAttackRange){
+				if (isWithinSkillRange){
+					distance = (byte)ClassifierAttributes.Distance.ATTACK_AND_SKILL;
+				}else{
+					distance = (byte)ClassifierAttributes.Distance.ATTACK;
+				}
+			}else if (isWithinSkillRange){
+				distance = (byte)ClassifierAttributes.Distance.SKILL;
+			}else{
+				distance = (byte)ClassifierAttributes.Distance.MOVEMENT;
+			}
+		}
+		
+		public InfoChars(){
+			classType = (byte)ClassifierAttributes.ClassType.NONE;
+			HP = 1+2+4;
+			threat = 1+2+4;
+			distance = 1+2+4+8;
+		}
+		
+		public InfoChars(InfoChars i){
+			this.classType = i.classType;
+			this.HP = i.HP;
+			this.threat = i.threat;
+			this.distance = i.distance;
+		}
+		
+		public bool equals(InfoChars i){
+			return ((classType == i.classType) && (HP == i.HP) && (threat == i.threat) && (distance == i.distance));
+		}
+		
+		public bool isSimilar(InfoChars i){
+			return (((classType & i.classType) > 0) && ((HP & i.HP) > 0) && ((threat & i.threat) > 0) && ((distance & i.distance) > 0));
+		}
+	}
+	
+	public List<InfoChars> infoAllies;
+	public List<InfoChars> infoEnnemies;
+	
+	public enum Action : byte {ApproachEnnemy , ApproachAlly , Flee , Attack , Skill};
+	public Action action;
+	
+	public float fitness;
+	public int useCount;
+	
+	public Classifier(HexaGrid hexaGrid,int charID){
+		Character c = hexaGrid.charList[charID];
+		
+		// ClassType
+		switch (c.charClass){
+			case CharClass.GUERRIER  : charClass = (byte)ClassifierAttributes.CharClass.GUERRIER; break;
+			case CharClass.VOLEUR    : charClass = (byte)ClassifierAttributes.CharClass.VOLEUR; break;
+			case CharClass.ARCHER    : charClass = (byte)ClassifierAttributes.CharClass.ARCHER; break;
+			case CharClass.MAGE      : charClass = (byte)ClassifierAttributes.CharClass.MAGE; break;
+			case CharClass.SOIGNEUR  : charClass = (byte)ClassifierAttributes.CharClass.SOIGNEUR; break;
+			case CharClass.ENVOUTEUR : charClass = (byte)ClassifierAttributes.CharClass.ENVOUTEUR; break;
+		}
+		
+		// HP
+		float HPprc = ((float)c.HP)/c.HPmax;
+		if (HPprc >= 0.75){
+			HP = (byte)ClassifierAttributes.HP_.BETWEEN_100_75;
+		}else if (HPprc >= 0.4){
+			HP = (byte)ClassifierAttributes.HP_.BETWEEN_74_40;
+		}else{
+			HP = (byte)ClassifierAttributes.HP_.BETWEEN_39_0;
+		}
+		
+		// PA
+		PA = (c.PA == 1) ? (byte)ClassifierAttributes.PA_.ONE : (byte)ClassifierAttributes.PA_.TWO_OR_MORE;
+		
+		// SkillAvailable
+		skillAvailable = (c.skillAvailable) ? (byte)ClassifierAttributes.SkillAvailable.YES : (byte)ClassifierAttributes.SkillAvailable.NO;
+		
+		// Threat
+		int threat_int = AIUtil.calculateThreatAtHexa(c.x,c.y,c.team); //Debug.Log("Threat : " + threat_int);
+		if (c.HP - threat_int <= 0){
+			threat = (byte)ClassifierAttributes.Threat.DEATH;
+		}else if (threat_int <= 2){
+			threat = (byte)ClassifierAttributes.Threat.SAFE;
+		}else{
+			threat = (byte)ClassifierAttributes.Threat.DANGER;
+		}
+		
+		// MaxTargets (0-1 for everyone, 0-3+ for mage)
+		int nb = AIUtil.getNbMaxTargets(charID);
+		if (nb == 0){
+			maxTargets = (byte)ClassifierAttributes.MaxTargets.NONE;
+		}else if (nb == 1){
+			maxTargets = (byte)ClassifierAttributes.MaxTargets.ONE;
+		}else if (nb == 2){
+			maxTargets = (byte)ClassifierAttributes.MaxTargets.TWO;
+		}else{
+			maxTargets = (byte)ClassifierAttributes.MaxTargets.THREE_OR_MORE;
+		}
+		
+		
+		infoAllies   = new List<InfoChars>();
+		infoEnnemies = new List<InfoChars>();
+		
+		// infoAllies / infoEnnemies
+		int char2ID = 0;
+		foreach (Character c2 in hexaGrid.charList){
+			if (c2 != c){
+				if (c2.team == c.team){ // Ally
+					// I am GUERRIER / VOLEUR / ARCHER / MAGE : 
+					switch (c.charClass){
+						case CharClass.GUERRIER :
+						case CharClass.VOLEUR :
+						case CharClass.ARCHER :
+						case CharClass.MAGE : {
+							switch (c2.charClass){
+								// ally is GUERRIER / VOLEUR / ARCHER / MAGE : Is Ally able to attack the ennemy that I want to attack ?
+								case CharClass.GUERRIER :
+								case CharClass.VOLEUR :
+								case CharClass.ARCHER :
+								case CharClass.MAGE : {
+									if (maxTargets != (byte)ClassifierAttributes.MaxTargets.NONE){
+										Character cAttack = AIUtil.findCharToAttack(charID);
+										if (cAttack != null){
+											bool isWithinAttackRange = hexaGrid.hexaInSight(c2.x,c2.y,cAttack.x,cAttack.y,c2.getClassData().basicAttack.range);
+											bool isWithinSkillRange = c2.skillAvailable && hexaGrid.hexaInSight(c2.x,c2.y,cAttack.x,cAttack.y,c2.getClassData().skill_1.range);
+											if (isWithinAttackRange || isWithinSkillRange){
+												infoAllies.Add(new InfoChars(c2,isWithinAttackRange,isWithinSkillRange));
+											}else{
+												// Get ennemy ID
+												int cAttackID = 0;
+												for (int i=0;i<hexaGrid.charList.Count;i++){
+													if (hexaGrid.charList[i] == cAttack){
+														Debug.Log(i);
+														cAttackID = i; i = hexaGrid.charList.Count;
+													}
+												}
+												if (AIUtil.isCharWithinRangeAttack(char2ID,cAttackID) ||(c.skillAvailable && AIUtil.isCharWithinRangeSkill(char2ID,cAttackID))){
+													infoAllies.Add(new InfoChars(c2,false,false));
+												}
+											}
+										}
+									}
+								} break;
+								// ally is SOIGNEUR / ENVOUTEUR : Is Ally able to heal/buff me ?
+								case CharClass.SOIGNEUR : 
+								case CharClass.ENVOUTEUR : {
+									bool isWithinAttackRange = hexaGrid.hexaInSight(c2.x,c2.y,c.x,c.y,c2.getClassData().basicAttack.range);
+									bool isWithinSkillRange = c2.skillAvailable && hexaGrid.hexaInSight(c2.x,c2.y,c.x,c.y,c2.getClassData().skill_1.range);
+									if (isWithinAttackRange || isWithinSkillRange){
+										infoAllies.Add(new InfoChars(c2,isWithinAttackRange,isWithinSkillRange));
+									}else{
+										if (AIUtil.isCharWithinRangeAttack(char2ID,charID) ||(c.skillAvailable && AIUtil.isCharWithinRangeSkill(char2ID,charID))){
+											infoAllies.Add(new InfoChars(c2,false,false));
+										}
+									}
+								} break;
+							}
+						} break;
+						// I am SOIGNEUR / ENVOUTEUR : Can I heal/buff my ally ?
+						case CharClass.SOIGNEUR : 
+						case CharClass.ENVOUTEUR : {
+							if (c.charClass == CharClass.SOIGNEUR && c2.HP == c2.HPmax){
+							}else{
+								bool isWithinAttackRange = hexaGrid.hexaInSight(c.x,c.y,c2.x,c2.y,c.getClassData().basicAttack.range);
+								bool isWithinSkillRange = c.skillAvailable && hexaGrid.hexaInSight(c.x,c.y,c2.x,c2.y,c.getClassData().skill_1.range);
+								if (isWithinAttackRange || isWithinSkillRange){
+									infoAllies.Add(new InfoChars(c2,isWithinAttackRange,isWithinSkillRange));
+								}else{
+									if (AIUtil.isCharWithinRangeAttack(charID,char2ID) ||(c.skillAvailable && AIUtil.isCharWithinRangeSkill(charID,char2ID))){
+										infoAllies.Add(new InfoChars(c2,false,false));
+									}
+								}
+							}
+						}break;
+					}
+						
+				}else{ // Ennemy : Can I reach the ennemy (directly or with movement)
+					switch (c.charClass){
+						case CharClass.GUERRIER :
+						case CharClass.VOLEUR :
+						case CharClass.ARCHER :
+						case CharClass.MAGE : {
+							bool isWithinAttackRange = hexaGrid.hexaInSight(c.x,c.y,c2.x,c2.y,c.getClassData().basicAttack.range);
+							bool isWithinSkillRange = c.skillAvailable && hexaGrid.hexaInSight(c.x,c.y,c2.x,c2.y,c.getClassData().skill_1.range);
+							if (isWithinAttackRange || isWithinSkillRange){
+								infoEnnemies.Add(new InfoChars(c2,isWithinAttackRange,isWithinSkillRange));
+							}else{
+								if (AIUtil.isCharWithinRangeAttack(charID,char2ID) ||(c.skillAvailable && AIUtil.isCharWithinRangeSkill(charID,char2ID))){
+									infoEnnemies.Add(new InfoChars(c2,false,false));
+								}
+							}
+						} break;
+						case CharClass.SOIGNEUR : 
+						case CharClass.ENVOUTEUR : {
+							// don't add anything to the list because it doesn't matter.
+						} break;
+					}
+				}
+			}
+			char2ID++;
+		}
+		
+		// fill allies/Ennemies with NONE
+		for (int i=infoAllies.Count;i<5;i++){
+			infoAllies.Add(new InfoChars());
+		}
+		for (int i=infoEnnemies.Count;i<5;i++){
+			infoEnnemies.Add(new InfoChars());
+		}
+		
+		action = Action.ApproachEnnemy;
+		useCount = 0;
+		fitness = 0.0f;
+        id = 0;
+        modified = true;
+	}
+	
+	// Copies the classifier c given.
+	public Classifier(Classifier c){
+		this.charClass = c.charClass;
+		this.HP = c.HP;
+		this.PA = c.PA;
+		this.skillAvailable = c.skillAvailable;
+		this.threat = c.threat;
+		this.maxTargets = c.maxTargets;
+		
+		this.infoAllies = new List<InfoChars>();
+		this.infoEnnemies = new List<InfoChars>();
+		foreach (InfoChars i in c.infoAllies) this.infoAllies.Add(new InfoChars(i));
+		foreach (InfoChars i in c.infoEnnemies) this.infoEnnemies.Add(new InfoChars(i));
+		
+		this.action = c.action;
+		this.fitness = c.fitness;
+		this.useCount = c.useCount;
+        this.id = 0;
+        this.modified = true;
+	}
+	
+	//String to Rule
+	public Classifier(string str){
+            //separateurs
+           
+        string[] separatingChars = { "*IA*" };
+		string[] separatingChars2 = { "*IE*" };
+		string[] separatingChars3 = { "/" };
+		string[] separatingChars4 = { "//" };
+		string[] W = str.Split(separatingChars, System.StringSplitOptions.RemoveEmptyEntries);
+	   // Debug.Log(W[0]);
+		// exemple affichage 2/1/2/1/1/1
+		string[] attributes = str.Split(separatingChars3, System.StringSplitOptions.RemoveEmptyEntries);
+
+		this.charClass = byte.Parse(attributes[0]);
+		this.HP = byte.Parse(attributes[1]);
+		this.PA = byte.Parse(attributes[2]);
+		this.skillAvailable = byte.Parse(attributes[3]);
+		this.threat = byte.Parse(attributes[4]);
+		this.maxTargets = byte.Parse(attributes[5]);
+
+		this.infoAllies = new List<InfoChars>();
+		this.infoEnnemies = new List<InfoChars>();
+		//Info Allies
+		//display 
+		//for exemple 8/7/7/15/
+	   // Debug.Log(W[1]);
+
+		for (int cmp = 0; cmp < 5; cmp++)
+		{
+			string strr = W[1].Substring(0, 9);
+			string[] attributes2 = strr.Split(separatingChars3, System.StringSplitOptions.RemoveEmptyEntries);
+		  //  Debug.Log(attributes2[0]);
+		   // Debug.Log(attributes2[1]);
+			InfoChars i = new InfoChars();
+			i.classType = byte.Parse(attributes2[0]);
+			i.HP = byte.Parse(attributes2[1]);
+			i.threat = byte.Parse(attributes2[2]);
+			i.distance = byte.Parse(attributes2[3]);
+			this.infoAllies.Add(new InfoChars(i));
+			//display         
+		  //  Debug.Log("classType= " + i.classType);
+		}
+
+		//Debug.Log("W=  " + W[2]);
+		string[] W2 = str.Split(separatingChars, System.StringSplitOptions.RemoveEmptyEntries);
+		//info ennemy
+		for (int cmp = 0; cmp < 5; cmp++)
+		{
+			string strr = W2[1].Substring(0, 9);
+			string[] attributes3 = strr.Split(separatingChars3, System.StringSplitOptions.RemoveEmptyEntries);
+
+			InfoChars i = new InfoChars();
+			i.classType = byte.Parse(attributes3[0]);
+			i.HP = byte.Parse(attributes3[1]);
+			i.threat = byte.Parse(attributes3[2]);
+			i.distance = byte.Parse(attributes3[3]);
+			this.infoEnnemies.Add(new InfoChars(i));
+
+		  //  Debug.Log("classType= " + i.classType);
+		}
+		string[] W4 = str.Split(separatingChars4, System.StringSplitOptions.RemoveEmptyEntries);
+		switch (W4[1]){ //ApproachEnnemy , ApproachAlly , Flee , Attack , Skill
+			case "ApproachEnnemy" : this.action = Action.ApproachEnnemy ; break;
+			case "ApproachAlly" : this.action = Action.ApproachAlly ; break;
+			case "Flee" : this.action = Action.Flee ; break;
+			case "Attack" : this.action = Action.Attack ; break;
+			case "Skill" : this.action = Action.Skill ; break;
+			default : Debug.Log("OUPS"); break;
+		}
+            this.modified = false;
+
+		
+		    
+	}
+	
+	public string RuleToString(){   //concatination des infos du personnage 
+		string c = string.Concat(this.charClass, "/", this.HP, "/", this.PA, "/", this.skillAvailable, "/", this.threat, "/", this.maxTargets, "/");
+		StringBuilder builder = new StringBuilder();
+
+		builder.Append(c);
+		//Ajout des informations des allies au stringBuilder
+		builder.Append("*IA*/");
+		for (int i = 0; i < this.infoAllies.Count; i++)
+		{
+			c = string.Concat(this.infoAllies[i].classType, "/", this.infoAllies[i].HP,
+				"/", this.infoAllies[i].threat, "/", this.infoAllies[i].distance, "/");
+			builder.Append(c);
+		}
+		builder.Append("*IA*/");
+		//fin des informations sur les allies  
+		//Ajout des informations des ennemis 
+		builder.Append("*IE*/");
+		for (int i = 0; i < this.infoEnnemies.Count; i++)
+		{
+			c = string.Concat(this.infoEnnemies[i].classType, "/", this.infoEnnemies[i].HP,
+				"/", this.infoEnnemies[i].threat, "/", this.infoEnnemies[i].distance, "/");
+			builder.Append(c);
+		}
+		builder.Append("*IE*//");
+		//fin des infos des ennemis 
+		//builder.Append(this.action.ToString());
+		return builder.ToString();
+	}
+	
+	public bool alliesEquals(Classifier c){
+		return (c.infoAllies[0].equals(infoAllies[0]) &&
+		c.infoAllies[1].equals(infoAllies[1]) &&
+		c.infoAllies[2].equals(infoAllies[2]) &&
+		c.infoAllies[3].equals(infoAllies[3]) &&
+		c.infoAllies[4].equals(infoAllies[4]));
+	}
+	
+	public bool ennemiesEquals(Classifier c){
+		return (c.infoEnnemies[0].equals(infoEnnemies[0]) &&
+		c.infoEnnemies[1].equals(infoEnnemies[1]) &&
+		c.infoEnnemies[2].equals(infoEnnemies[2]) &&
+		c.infoEnnemies[3].equals(infoEnnemies[3]) &&
+		c.infoEnnemies[4].equals(infoEnnemies[4]));
+	}
+	
+	public bool alliesSimilar(Classifier c){
+		return ((c.infoAllies[0].isSimilar(infoAllies[0])) &&
+		(c.infoAllies[1].isSimilar(infoAllies[1])) &&
+		(c.infoAllies[2].isSimilar(infoAllies[2])) &&
+		(c.infoAllies[3].isSimilar(infoAllies[3])) &&
+		(c.infoAllies[4].isSimilar(infoAllies[4])));
+	}
+	
+	public bool ennemiesSimilar(Classifier c){
+		return (c.infoEnnemies[0].isSimilar(infoEnnemies[0]) &&
+		c.infoEnnemies[1].isSimilar(infoEnnemies[1]) &&
+		c.infoEnnemies[2].isSimilar(infoEnnemies[2]) &&
+		c.infoEnnemies[3].isSimilar(infoEnnemies[3]) &&
+		c.infoEnnemies[4].isSimilar(infoEnnemies[4]));
+	}
+	
+	public bool equals(Classifier c){
+		return ((charClass == c.charClass) &&
+		(HP == c.HP) &&
+		(PA == c.PA) &&
+		(PA == c.PA) &&
+		(skillAvailable == c.skillAvailable) &&
+		(threat == c.threat) &&
+		(maxTargets == c.maxTargets) &&
+		(alliesEquals(c)) &&
+		(ennemiesEquals(c)) && 
+		(action == c.action));
+	}
+	
+	public bool isSimilar(Classifier c){
+		return (((charClass & c.charClass) > 0) &&
+		((HP & c.HP) > 0) &&
+		((PA & c.PA) > 0) &&
+		((PA & c.PA) > 0) &&
+		((skillAvailable & c.skillAvailable) > 0) &&
+		((threat & c.threat) > 0) &&
+		((maxTargets & c.maxTargets) > 0) &&
+		(alliesSimilar(c)) &&
+		(ennemiesSimilar(c)) && 
+		(action == c.action));
+	}
+	
+	// These don't check for action match (Used to matching situations)
+	public bool equals2(Classifier c){
+		return ((charClass == c.charClass) &&
+		(HP == c.HP) &&
+		(PA == c.PA) &&
+		(PA == c.PA) &&
+		(skillAvailable == c.skillAvailable) &&
+		(threat == c.threat) &&
+		(maxTargets == c.maxTargets) &&
+		(alliesEquals(c)) &&
+		(ennemiesEquals(c)));
+	}
+	
+	public bool isSimilar2(Classifier c){
+		return (((charClass & c.charClass) > 0) &&
+		((HP & c.HP) > 0) &&
+		((PA & c.PA) > 0) &&
+		((PA & c.PA) > 0) &&
+		((skillAvailable & c.skillAvailable) > 0) &&
+		((threat & c.threat) > 0) &&
+		((maxTargets & c.maxTargets) > 0) && 
+		(alliesSimilar(c)) &&
+		(ennemiesSimilar(c)));
+	}
+	
+	public string getStringInfo(){
+		string strDisp = "Char class : ";
+		if ((charClass & (byte)ClassifierAttributes.CharClass.GUERRIER) > 0) strDisp += "GUERRIER ";
+		if ((charClass & (byte)ClassifierAttributes.CharClass.VOLEUR) > 0) strDisp += "VOLEUR ";
+		if ((charClass & (byte)ClassifierAttributes.CharClass.ARCHER) > 0) strDisp += "ARCHER ";
+		if ((charClass & (byte)ClassifierAttributes.CharClass.MAGE) > 0) strDisp += "MAGE ";
+		if ((charClass & (byte)ClassifierAttributes.CharClass.SOIGNEUR) > 0) strDisp += "SOIGNEUR ";
+		if ((charClass & (byte)ClassifierAttributes.CharClass.ENVOUTEUR) > 0) strDisp += "ENVOUTEUR ";
+		
+		strDisp += "| HP : ";
+		if ((HP & (byte)ClassifierAttributes.HP_.BETWEEN_100_75) > 0) strDisp += "100-75% ";
+		if ((HP & (byte)ClassifierAttributes.HP_.BETWEEN_74_40) > 0) strDisp += "74-40% ";
+		if ((HP & (byte)ClassifierAttributes.HP_.BETWEEN_39_0) > 0) strDisp += "39-0% ";
+		
+		strDisp += "| PA : ";
+		if ((PA & (byte)ClassifierAttributes.PA_.ONE) > 0) strDisp += "ONE ";
+		if ((PA & (byte)ClassifierAttributes.PA_.TWO_OR_MORE) > 0) strDisp += "TWO+ ";
+		
+		strDisp += "| Skill : ";
+		if ((skillAvailable & (byte)ClassifierAttributes.SkillAvailable.YES) > 0) strDisp += "YES ";
+		if ((skillAvailable & (byte)ClassifierAttributes.SkillAvailable.NO) > 0) strDisp += "NO ";
+		
+		strDisp += "| Threat : ";
+		if ((threat & (byte)ClassifierAttributes.Threat.SAFE) > 0) strDisp += "SAFE ";
+		if ((threat & (byte)ClassifierAttributes.Threat.DANGER) > 0) strDisp += "DANGER ";
+		if ((threat & (byte)ClassifierAttributes.Threat.DEATH) > 0) strDisp += "DEATH ";
+		
+		strDisp += "| Max Targets : ";
+		if ((maxTargets & (byte)ClassifierAttributes.MaxTargets.NONE) > 0) strDisp += "NONE ";
+		if ((maxTargets & (byte)ClassifierAttributes.MaxTargets.ONE) > 0) strDisp += "ONE ";
+		if ((maxTargets & (byte)ClassifierAttributes.MaxTargets.TWO) > 0) strDisp += "TWO ";
+		if ((maxTargets & (byte)ClassifierAttributes.MaxTargets.THREE_OR_MORE) > 0) strDisp += "THREE+ ";
+		
+		strDisp += "\nAllies :";
+		foreach (InfoChars i in infoAllies){
+			strDisp += "\nClass Type : ";
+			if ((i.classType & (byte)ClassifierAttributes.ClassType.SOIGNEUR) > 0) strDisp += "SOIGNEUR ";
+			if ((i.classType & (byte)ClassifierAttributes.ClassType.ENVOUTEUR) > 0) strDisp += "ENVOUTEUR ";
+			if ((i.classType & (byte)ClassifierAttributes.ClassType.OTHER) > 0) strDisp += "OTHER ";
+			if ((i.classType & (byte)ClassifierAttributes.ClassType.NONE) > 0) strDisp += "NONE ";
+			strDisp += "| HP : ";
+			if ((i.HP & (byte)ClassifierAttributes.HP_.BETWEEN_100_75) > 0) strDisp += "100-75% ";
+			if ((i.HP & (byte)ClassifierAttributes.HP_.BETWEEN_74_40) > 0) strDisp += "74-40% ";
+			if ((i.HP & (byte)ClassifierAttributes.HP_.BETWEEN_39_0) > 0) strDisp += "39-0% ";
+			
+			strDisp += "| Threat : ";
+			if ((i.threat & (byte)ClassifierAttributes.Threat.SAFE) > 0) strDisp += "SAFE ";
+			if ((i.threat & (byte)ClassifierAttributes.Threat.DANGER) > 0) strDisp += "DANGER ";
+			if ((i.threat & (byte)ClassifierAttributes.Threat.DEATH) > 0) strDisp += "DEATH ";
+			
+			strDisp += "| Distance : ";
+			if ((i.distance & (byte)ClassifierAttributes.Distance.ATTACK) > 0) strDisp += "ATTACK ";
+			if ((i.distance & (byte)ClassifierAttributes.Distance.SKILL) > 0) strDisp += "SKILL ";
+			if ((i.distance & (byte)ClassifierAttributes.Distance.ATTACK_AND_SKILL) > 0) strDisp += "ATTACK/SKILL ";
+			if ((i.distance & (byte)ClassifierAttributes.Distance.MOVEMENT) > 0) strDisp += "MOVEMENT ";
+		}
+		strDisp += "\nEnnemies :";
+		foreach (InfoChars i in infoEnnemies){
+			strDisp += "\nClass Type : ";
+			if ((i.classType & (byte)ClassifierAttributes.ClassType.SOIGNEUR) > 0) strDisp += "SOIGNEUR ";
+			if ((i.classType & (byte)ClassifierAttributes.ClassType.ENVOUTEUR) > 0) strDisp += "ENVOUTEUR ";
+			if ((i.classType & (byte)ClassifierAttributes.ClassType.OTHER) > 0) strDisp += "(GUERRIER/VOLEUR/ARCHER/MAGE) ";
+			strDisp += "| HP : ";
+			if ((i.HP & (byte)ClassifierAttributes.HP_.BETWEEN_100_75) > 0) strDisp += "100-75% ";
+			if ((i.HP & (byte)ClassifierAttributes.HP_.BETWEEN_74_40) > 0) strDisp += "74-40% ";
+			if ((i.HP & (byte)ClassifierAttributes.HP_.BETWEEN_39_0) > 0) strDisp += "39-0% ";
+			
+			strDisp += "| Threat : ";
+			if ((i.threat & (byte)ClassifierAttributes.Threat.SAFE) > 0) strDisp += "SAFE ";
+			if ((i.threat & (byte)ClassifierAttributes.Threat.DANGER) > 0) strDisp += "DANGER ";
+			if ((i.threat & (byte)ClassifierAttributes.Threat.DEATH) > 0) strDisp += "DEATH ";
+			
+			strDisp += "| Distance : ";
+			if ((i.distance & (byte)ClassifierAttributes.Distance.ATTACK) > 0) strDisp += "ATTACK ";
+			if ((i.distance & (byte)ClassifierAttributes.Distance.SKILL) > 0) strDisp += "SKILL ";
+			if ((i.distance & (byte)ClassifierAttributes.Distance.ATTACK_AND_SKILL) > 0) strDisp += "ATTACK/SKILL ";
+			if ((i.distance & (byte)ClassifierAttributes.Distance.MOVEMENT) > 0) strDisp += "MOVEMENT ";
+		}
+		
+		strDisp += "\nAction : " + action;
+		
+		return strDisp;
+	}
+	
+	/** used for mutations  */
+	public static Action getRandomAction(){
+		var values = Action.GetValues(typeof(Action));
+		System.Random random = new System.Random();
+		int nb = random.Next(0,values.Length);
+		Action randomVal = (Action)values.GetValue(nb);
+		return randomVal;
+	}
+}
+
+public class ClassifierSystem {
+	public List<Classifier> classifiers;
+	
+	public ClassifierSystem(){
+		classifiers = new List<Classifier>();
+	}
+	
+	/// <summary>
+    /// Constructor of the classifier List from a databse instance , 
+	/// DEPENDENCY TO DO : DATABASE get Instance function  , Constructur of the Classifier  that use  a STRING as parmeter 
+    /// </summary>
+	public ClassifierSystem(IDbConnection dbconn ){
+	Debug.Log("Load From Database");
+		classifiers = new List<Classifier>();
+		
+		IDbCommand dbcmd = dbconn.CreateCommand();
+		string sqlQuery = "SELECT * FROM Rules ";
+		dbcmd.CommandText = sqlQuery;
+		IDataReader reader = dbcmd.ExecuteReader();
+     	 
+		while (reader.Read())
+     	{
+            int id = reader.GetInt32(0);
+			string situation = reader.GetString(1);
+			string action = reader.GetString(2);
+            float fitness = reader.GetFloat(3);
+			StringBuilder builder = new StringBuilder();
+			builder.Append(situation);
+			builder.Append(action);
+			string result = builder.ToString();
+			Classifier tempClassifier = new Classifier(result);
+            tempClassifier.id = id;
+            tempClassifier.fitness = fitness;
+			classifiers.Add(tempClassifier);	
+    	}
+
+		reader.Close();
+		reader = null;
+		dbcmd.Dispose();
+		dbcmd = null;
+		dbconn.Close();
+		dbconn = null;
+    }
+
+    public void saveInDB(){
+        foreach (Classifier c in classifiers){
+            if (c.id == 0){
+                DB.addRule(c);
+            }else if (c.modified){
+                DB.UpdateRuleFitness(c);
+            }
+        }
+    }
+	
+	public void Add(Classifier classifier){
+		classifiers.Add(classifier);
+	}
+	
+	public List<Classifier> findMatchingClassifiers(Classifier classifier){
+		List<Classifier> r = new List<Classifier>();
+		foreach (Classifier c in classifiers){
+			if (c.isSimilar2(classifier)){
+				r.Add(c);
+			}
+		}
+		return r;
+	}
+	
+	public string getStringInfo(){
+		string str = "";
+		for (int i=0;i<classifiers.Count;i++){
+			str += i+1 + " :\n" + classifiers[i].getStringInfo() + "\n--------------------------------------------------------------------------------------------------------------\n";
+		}
+		return str;
+	}
+	
+	public void dispInFile(string filePath){
+		System.IO.File.WriteAllText(filePath,getStringInfo());
+	}
+	/// <summary>
+    /// Order a list of classifier  by fitness
+	/// <returns> a list of orderder Classifier</returns>
+	/// <param name="classifiers"> the list to order </param>
+    /// </summary>
+	public static List<Classifier> orderByFitness (List<Classifier> classifiers){
+		if (classifiers.Count!=0){
+		List<Classifier> tempOrderListByFitness=new List<Classifier>();
+		tempOrderListByFitness= classifiers.OrderBy(o=>o.fitness).ToList();
+		return tempOrderListByFitness;
+		}
+		else  return null;
+	}
+	/// <summary>
+    /// get the fitness sum of a classifier list
+	/// <param name="classifiers">: the list to calculate the sum
+	/// <returns>  fitness sum  </returns>  
+    /// </summary>
+	public static float getFitnessSum(List<Classifier> classifiers){
+		float sum=0;
+			foreach(Classifier c in classifiers){
+		
+			sum+=c.fitness;
+			}
+		return sum;
+	}
+	/// <summary>
+    /// get classifier from list of classifier with RouletteWheel Selection
+	/// <param name="classifiers">: the list of matching classifiers
+	/// <returns>  selected classifier  </returns>  
+    /// </summary>
+	public static Classifier getBestActionClassifierRW(List<Classifier> classifiers){
+	if (classifiers.Count!=0){
+		List<Classifier> tempsClassifiers = orderByFitness(classifiers);
+		float number = (float)UnityEngine.Random.Range(0.0f, getFitnessSum(classifiers));
+		float tempsSum=0;
+		
+		for(int i=0; i<classifiers.Count;i++)
+		{
+			if(i!=classifiers.Count-1){
+				if (classifiers[i].fitness<number && classifiers[i+1].fitness>number)
+				return classifiers[i];
+				
+			}
+			else return classifiers[i];
+		}
+		return classifiers[0];
+		}
+		else return null;
+	}
+	/// <summary>
+    /// get classifier from list of classifier with Elitis Selection
+	/// <param name="classifiers">: the list of matching classifiers
+	/// <returns>  selected classifier  </returns>  
+    /// </summary>
+	public static Classifier getBestActionClassifierEL(List<Classifier> classifiers){
+		if (classifiers.Count!=0){
+			List<Classifier> tempsClassifiers = orderByFitness(classifiers);
+			return tempsClassifiers[classifiers.Count-1];
+		}
+		else return null;
+	}
+
+	/// <summary>
+    /// get classifier from list of classifier randomly
+	/// <param name="classifiers">: the list of matching classifiers
+	/// <returns>  selected classifier  </returns>  
+    /// </summary>
+	public static Classifier getRandomClassifierFromList(List<Classifier> classifiers){
+		if (classifiers.Count==1){
+		return classifiers[0];
+		}
+		if (classifiers.Count!=0){
+			int randIndex = UnityEngine.Random.Range(0,classifiers.Count-1);
+			return classifiers[randIndex];
+		}
+		
+		else return null;
+	}
+	
+	/// <summary>
+    /// get classifier from list of classifier with the tournament selection
+	/// <param name="classifiers">: the list of matching classifiers
+	/// <returns>  selected classifier  </returns>  
+    /// </summary>
+	public static Classifier getBestActionClassifierTS(List<Classifier> classifiers){
+		if (classifiers.Count==0){
+			return null;
+		}
+		else if (classifiers.Count==1 || classifiers.Count==2) 
+			return getBestActionClassifierEL(classifiers);
+		else {
+			Classifier cl1=getRandomClassifierFromList(classifiers);
+			Classifier cl2=getRandomClassifierFromList(classifiers);
+			int nb=0;
+			while(cl2.action==cl1.action && nb <10)
+				{
+				 cl2=getRandomClassifierFromList(classifiers);
+				 nb++;
+				}
+			if (cl1.fitness>cl2.fitness) return cl1;
+			else return cl2;
+
+			}
+	
+	}
+}
+
+}

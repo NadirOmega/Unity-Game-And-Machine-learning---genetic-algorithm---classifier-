@@ -1,0 +1,173 @@
+﻿using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using Classifiers;
+
+
+public class AlgoGen 
+{
+	/**FAIRE ATTENTION  */
+	// MUTATION
+
+	public static void MutateClassTypeCurrentChar (Classifier currentClassifier){
+		
+		/*TO DO  */
+		/* 
+		Classifier tempClassifier= currentClassifier.Copy();
+		currentClassifier.display();
+		tempClassifier.HP =(byte)Classifier.returnRandomHPValue();
+		tempClassifier.display();*/
+
+		/*END */
+	}
+	public static void MutateHpCurrentChar (Classifier classifier){
+		classifier.HP = (byte)ClassifierAttributes.getRandomHPValue();
+	}
+
+	public static void MutatePACurrentChar (Classifier classifier){
+		classifier.PA = (byte)ClassifierAttributes.getRandomPAValue();
+	}
+	
+	public static void MutateActionCurrentChar (Classifier classifier){
+		classifier.action = Classifier.getRandomAction();
+	}
+	
+	public static void MutateThreatCurrentChar (Classifier classifier){
+		classifier.threat = (byte)ClassifierAttributes.getRandomThreatValue();
+	}
+
+	public static void MutateHpAlly (Classifier classifier){
+		for(int i=0; i<classifier.infoAllies.Count ;i++) {
+			if (classifier.infoAllies[i].classType != (byte)ClassifierAttributes.ClassType.NONE){
+				classifier.infoAllies[i].HP = (byte)ClassifierAttributes.getRandomCharTypeValue((byte)classifier.infoAllies[i].HP);
+			}
+		}
+	}
+
+	public static void MutateCharTypeAlly (Classifier classifier){
+		for(int i=0; i<classifier.infoAllies.Count ;i++) {
+			if (classifier.infoAllies[i].classType != (byte)ClassifierAttributes.ClassType.NONE){
+				classifier.infoAllies[i].classType = (byte)ClassifierAttributes.getRandomCharTypeValue((byte)classifier.infoAllies[i].classType);
+			}
+		}
+	}
+	
+	// CROSSOVER
+	
+	//Croisement du personnage courant d'une régle extraite d'une BDD avec la régle courante 
+    public static void CrossOverCurrentChar(Classifier currentClassifier, Classifier classifierFromDB)
+    {
+        Classifier tempClassifier = new Classifier(currentClassifier);
+        Classifier tempClassifier2 = new Classifier(classifierFromDB);
+
+		// !!!!!!!!!!!!!!!!!!!!!!!
+		// ADD MASK
+		// !!!!!!!!!!!!!!!!!!!!!!!
+        tempClassifier.charClass = classifierFromDB.charClass;
+        tempClassifier.HP = classifierFromDB.HP;
+        tempClassifier.PA = classifierFromDB.PA;
+        tempClassifier.skillAvailable = classifierFromDB.skillAvailable;
+        tempClassifier.threat = classifierFromDB.threat;
+        tempClassifier.action = classifierFromDB.action;
+
+        tempClassifier2.charClass = currentClassifier.charClass;
+        tempClassifier2.HP = currentClassifier.HP;
+        tempClassifier2.PA = currentClassifier.PA;
+        tempClassifier2.skillAvailable = currentClassifier.skillAvailable;
+        tempClassifier2.threat = currentClassifier.threat;
+        tempClassifier2.action = currentClassifier.action;
+    }
+
+    // Croisement sur les alliés d'une régle extraite de la BDD avec la régle courante
+    public static void CrossOverAlly(Classifier currentClassifier, Classifier ClassifierFromDB)
+    {
+        Classifier tempClassifier = new Classifier(currentClassifier);
+        Classifier tempClassifier2 = new Classifier(ClassifierFromDB);
+
+		List<Classifier.InfoChars> info1 = tempClassifier.infoAllies;
+		List<Classifier.InfoChars> info2 = tempClassifier2.infoAllies;
+		
+		// swap allies info
+		tempClassifier.infoAllies  = info2;
+		tempClassifier2.infoAllies = info1;
+		
+		
+        /*for (int i = 0; i < currentClassifier.infoAllies.Count; i++)
+        {
+			if (currentClassifier.infoAllies[i].classType != (byte)ClassifierAttributes.ClassType.NONE){
+                //tempClassifier.HP = 4;
+                tempClassifier2.infoAllies.Add(new InfoChars(currentClassifier.infoAllies[i]));
+            }
+        }
+
+        for (int i = 0; i < ClassifierFromDB.infoEnnemies.Count; i++)
+        {
+            if ((currentClassifier.infoAllies[i].classType) == (byte)8)
+            {
+            }
+            else
+            {
+                tempClassifier.infoAllies.Add(currentClassifier.infoAllies[i].Copy());
+            }
+        }*/
+        //Debug.Log("Affichage Algogen");
+        Debug.Log(tempClassifier.getStringInfo());
+        Debug.Log(tempClassifier2.getStringInfo());
+    }
+
+    // Croisement sur les ennemies d'une régle extraite de la BDD avec la régle courante
+    public static void CrossOverEnnemy(Classifier currentClassifier, Classifier ClassifierFromDB)
+    {
+        Classifier tempClassifier = new Classifier(currentClassifier);
+        Classifier tempClassifier2 = new Classifier(ClassifierFromDB);
+
+		List<Classifier.InfoChars> info1 = tempClassifier.infoEnnemies;
+		List<Classifier.InfoChars> info2 = tempClassifier2.infoEnnemies;
+		
+		// swap ennemies info
+		tempClassifier.infoEnnemies  = info2;
+		tempClassifier2.infoEnnemies = info1;
+
+        /*for (int i = 0; i < currentClassifier.infoEnnemies.Count; i++)
+        {
+            //Verifier si Classtype != NONE 
+            if ((currentClassifier.infoEnnemies[i].classType) == (byte)8)
+            {
+            }
+            else
+            {
+                tempClassifier2.infoEnnemies.Add(currentClassifier.infoEnnemies[i].Copy());
+            }
+        }
+        for (int i = 0; i < ClassifierFromDB.infoEnnemies.Count; i++)
+        {
+            //Verifier si Classtype != NONE 
+            if ((currentClassifier.infoEnnemies[i].classType) == (byte)8)
+            {
+            }
+            else
+            {
+                tempClassifier.infoAllies.Add(currentClassifier.infoEnnemies[i].Copy());
+            }
+        }*/
+        Debug.Log(tempClassifier.getStringInfo());
+        Debug.Log(tempClassifier2.getStringInfo());
+    }
+
+   /* // croisement sur les fitness des deux regles 
+    public static void CrossOverFitness(Classifier currentClassifier, Classifier ClassifierFromDB)
+    {
+        Classifier tempClassifier = currentClassifier.Copy();
+        tempClassifier.infoEnnemies = new List<Classifier.InfoChars>();
+        Classifier tempClassifier2 = ClassifierFromDB.Copy();
+        tempClassifier2.infoEnnemies = new List<Classifier.InfoChars>();
+
+        tempClassifier.fitness = ClassifierFromDB.fitness;
+        tempClassifier2.fitness = currentClassifier.fitness;
+        //  Debug.Log(currentClassifier.fitness);
+        //  Debug.Log(ClassifierFromDB.fitness);      
+        tempClassifier.display();
+        tempClassifier2.display();
+
+    }*/
+}

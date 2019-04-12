@@ -1,0 +1,228 @@
+﻿using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using Hexas;
+using Misc;
+using Characters;
+using AI_Util;
+using static MainGame;
+
+namespace AI_Class {
+	
+	
+public class ActionAIPos{
+	public MainGame.ActionType action;
+	public Point pos;
+	
+	public ActionAIPos(MainGame.ActionType action,Point pos){
+		this.action = action;
+		this.pos = pos;
+	}
+}
+
+public class AI{
+	public static HexaGrid hexaGrid;
+	
+	
+	
+	public static List<ActionAIPos> decide(int charID){
+		List<ActionAIPos> sequence = new List<ActionAIPos>();
+		sequence.Add(new ActionAIPos(MainGame.ActionType.SKIP,null));
+		return sequence;
+	}
+}
+
+public class AIEasy : AI {
+	new public static List<ActionAIPos> decide(int charID){
+		Character currentChar = hexaGrid.charList[charID];
+		List<ActionAIPos> sequence = new List<ActionAIPos>();
+		
+		switch (currentChar.charClass){
+			case CharClass.GUERRIER :
+			case CharClass.VOLEUR :
+			case CharClass.ARCHER :
+			case CharClass.MAGE : {
+				int[] damage = AIUtil.calculateDamage(charID);
+				List<Point> listH = hexaGrid.findAllPaths(currentChar.x,currentChar.y,currentChar.PM*currentChar.PA);
+				if (listH != null && listH.Count > 0){
+					// Find hexas where damage dealt is highest
+					List<Point> bestHexas  = AIUtil.findHexasWhereValueIsMax(listH,damage);
+					// Find hexas where position to lowest ennemy is lowest
+					List<Point> bestHexas2 = AIUtil.findHexasClosestToLowestEnnemy(charID,bestHexas);
+					Point bestHexa = bestHexas2[0];
+					// find path to hexa
+					sequence = AIUtil.findSequencePathToHexa(charID,bestHexa.x,bestHexa.y);
+					// Attack the ennemy
+					int nbPA = currentChar.PA - sequence.Count;
+					if (nbPA != 0){
+						for (int i=0;i<nbPA;i++){
+							Character cAttack = AIUtil.findCharToAttack(charID);
+							if (cAttack != null){
+								sequence.Add(new ActionAIPos(MainGame.ActionType.ATK1,new Point(cAttack.x,cAttack.y)));
+							}else if (bestHexa.x == currentChar.x && bestHexa.y == currentChar.y){
+								sequence.Add(new ActionAIPos(MainGame.ActionType.SKIP,null));
+							}
+						}
+					}
+				}else{
+					sequence.Add(new ActionAIPos(MainGame.ActionType.SKIP,null));
+				}
+			} break;
+			case CharClass.SOIGNEUR : {
+				int[] healing = AIUtil.calculateHealing(currentChar.team);
+				List<Point> listH = hexaGrid.findAllPaths(currentChar.x,currentChar.y,currentChar.PM*currentChar.PA);
+				if (listH != null && listH.Count > 0){
+					// Find hexas where healing done is highest
+					List<Point> bestHexas  = AIUtil.findHexasWhereValueIsMax(listH,healing);
+					// Find hexas where position to lowest ennemy is lowest
+					List<Point> bestHexas2 = AIUtil.findHexasClosestToLowestEnnemy(charID,bestHexas);
+					Point bestHexa = bestHexas2[0];
+					// find path to hexa
+					sequence = AIUtil.findSequencePathToHexa(charID,bestHexa.x,bestHexa.y);
+					int nbPA = currentChar.PA - sequence.Count;
+					// Heal allies
+					if (nbPA != 0){
+						for (int i=0;i<nbPA;i++){
+							Character cHeal = AIUtil.findCharToHeal(charID);
+							if (cHeal != null){
+								sequence.Add(new ActionAIPos(MainGame.ActionType.ATK1,new Point(cHeal.x,cHeal.y)));
+							}else if (bestHexa.x == currentChar.x && bestHexa.y == currentChar.y){
+								sequence.Add(new ActionAIPos(MainGame.ActionType.SKIP,null));
+							}
+						}
+					}
+				}else{
+					sequence.Add(new ActionAIPos(MainGame.ActionType.SKIP,null));
+				}
+			} break;
+			// TO DO
+			case CharClass.ENVOUTEUR : {
+				int[] healing = AIUtil.calculateHealing(currentChar.team);
+				List<Point> listH = hexaGrid.findAllPaths(currentChar.x,currentChar.y,currentChar.PM*currentChar.PA);
+				if (listH != null && listH.Count > 0){
+					// Find hexas where healing done is highest
+					List<Point> bestHexas  = AIUtil.findHexasWhereValueIsMax(listH,healing);
+					// Find hexas where position to lowest ennemy is lowest
+					List<Point> bestHexas2 = AIUtil.findHexasClosestToLowestEnnemy(charID,bestHexas);
+					Point bestHexa = bestHexas2[0];
+					// find path to hexa
+					sequence = AIUtil.findSequencePathToHexa(charID,bestHexa.x,bestHexa.y);
+					int nbPA = currentChar.PA - sequence.Count;
+					// Heal allies
+					if (nbPA != 0){
+						for (int i=0;i<nbPA;i++){
+							Character cHeal = AIUtil.findCharToHeal(charID);
+							if (cHeal != null){
+								sequence.Add(new ActionAIPos(MainGame.ActionType.ATK1,new Point(cHeal.x,cHeal.y)));
+							}else if (bestHexa.x == currentChar.x && bestHexa.y == currentChar.y){
+								sequence.Add(new ActionAIPos(MainGame.ActionType.SKIP,null));
+							}
+						}
+					}
+				}else{
+					sequence.Add(new ActionAIPos(MainGame.ActionType.SKIP,null));
+				}
+			} break;
+		}
+		
+		return sequence;
+	}
+}
+
+public class AIMedium : AI{
+	new public static List<ActionAIPos> decide(int charID){
+		Character currentChar = hexaGrid.charList[charID];
+		List<ActionAIPos> sequence = new List<ActionAIPos>();
+		
+		switch (currentChar.charClass){
+			case CharClass.GUERRIER :
+			case CharClass.VOLEUR :
+			case CharClass.ARCHER :
+			case CharClass.MAGE : {
+				int[] threat = AIUtil.calculateThreat(currentChar.team);
+				int[] damage = AIUtil.calculateDamage(charID);
+				int[] dif = new int[hexaGrid.w*hexaGrid.h];
+				
+				for (int i=0;i<dif.Length;i++){
+					dif[i] = (int)(1.5f*damage[i] - (float)threat[i]);
+				}
+				
+				List<Point> listH = hexaGrid.findAllPaths(currentChar.x,currentChar.y,currentChar.PM*currentChar.PA);
+				if (listH != null && listH.Count > 0){
+					// find best value
+					int maxValue = dif[listH[0].x+listH[0].y*hexaGrid.w];
+					foreach (Point p in listH){
+						int v = dif[p.x+p.y*hexaGrid.w];
+						if (v > maxValue) maxValue = v;
+					}
+					// find all hexas with best value
+					List<Point> bestHexas = new List<Point>();
+					foreach (Point p in listH){
+						int v = dif[p.x+p.y*hexaGrid.w];
+						if (v == maxValue) bestHexas.Add(p);
+					}
+					// find the hexa with best value closest to lowest ennemy
+					Point bestHexa = null;
+					if (bestHexas.Count == 1){
+						bestHexa = bestHexas[0];
+					}else{
+						int minDistance = 100000;
+						bestHexa = null;
+						Character cLowest = AIUtil.findLowestEnnemy(currentChar.team);
+						foreach (Point p in bestHexas){
+							int d = AIUtil.getDistance(p.x,p.y,cLowest.x,cLowest.y);
+							if (d != -1){
+								if (d < minDistance){
+									minDistance = d;
+									bestHexa = p;
+								}
+							}
+						}
+					}
+					// find path to hexa
+					int nbPA = currentChar.PA;
+					if (bestHexa != null){
+						if (bestHexa.x == currentChar.x && bestHexa.y == currentChar.y){
+							
+						}else{
+							int d = AIUtil.getDistance(currentChar.x,currentChar.y,bestHexa.x,bestHexa.y);
+							List<Point> shortestPath = hexaGrid.findShortestPath(currentChar.x,currentChar.y,bestHexa.x,bestHexa.y,d);
+							for (int i=0;i<=d && nbPA > 0;i+=currentChar.PM){
+								Point destination = shortestPath[((i+currentChar.PM) <= d) ? (i+currentChar.PM) : d];
+								sequence.Add(new ActionAIPos(MainGame.ActionType.MOVE,new Point(destination.x,destination.y)));
+								nbPA--;
+							}
+						}
+						if (nbPA == 0){
+							
+						}else{
+							for (int i=0;i<nbPA;i++){
+								Character cAttack = AIUtil.findCharToAttack(charID);
+								if (cAttack != null){
+									sequence.Add(new ActionAIPos(MainGame.ActionType.ATK1,new Point(cAttack.x,cAttack.y)));
+								}else if (bestHexa.x == currentChar.x && bestHexa.y == currentChar.y){
+									sequence.Add(new ActionAIPos(MainGame.ActionType.SKIP,null));
+								}
+							}
+							
+						}
+					}else{
+						sequence.Add(new ActionAIPos(MainGame.ActionType.SKIP,null));
+					}
+				}else{
+					sequence.Add(new ActionAIPos(MainGame.ActionType.SKIP,null));
+				}
+			} break;
+			case CharClass.SOIGNEUR : {
+				sequence.Add(new ActionAIPos(MainGame.ActionType.SKIP,null));
+			} break;
+			case CharClass.ENVOUTEUR : {
+				sequence.Add(new ActionAIPos(MainGame.ActionType.SKIP,null));
+			} break;
+		}
+		
+		return sequence;
+	}
+}
+
+}
